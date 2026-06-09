@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEX Realtime Koersen & Portefeuille</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #212529;
+            --border-color: #dee2e6;
+            --pos-color: #2b7b38;
+            --pos-bg: #e6f4ea;
+            --neg-color: #c5221f;
+            --neg-bg: #fce8e6;
+            --primary: #0d6efd;
+            --primary-hover: #0b5ed7;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 15px;
+            font-size: 13px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        h1 { margin: 0 0 10px 0; font-size: 20px; color: #333; }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+            background: #f1f3f4;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        button {
+            background-color: #fff;
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        button:hover { background-color: #f8f9fa; border-color: #bfaeaf; }
+        button.btn-primary { background-color: var(--primary); color: white; border-color: var(--primary); }
+        button.btn-primary:hover { background-color: var(--primary-hover); }
+        button.btn-danger { color: var(--neg-color); }
+        button.btn-danger:hover { background-color: var(--neg-bg); }
+        .toggle-container { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+        .input-group { display: flex; align-items: center; gap: 5px; }
+        input[type="number"], input[type="text"] { padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 13px; }
+        input[type="number"] { width: 50px; }
+        .status-bar { font-weight: 500; padding: 6px 10px; border-radius: 4px; background: #e8eaed; flex-grow: 1; text-align: right; }
+        .table-responsive { overflow-x: auto; border: 1px solid var(--border-color); border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; text-align: left; white-space: nowrap; }
+        th { background-color: #f1f3f4; color: #5f6368; padding: 8px 10px; font-weight: 600; border-bottom: 2px solid var(--border-color); position: sticky; top: 0; }
+        td { padding: 6px 10px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+        tr:hover { background-color: #f8f9fa; }
+        .pos { color: var(--pos-color); font-weight: 600; }
+        .neg { color: var(--neg-color); font-weight: 600; }
+        .actions { display: flex; gap: 5px; }
+        .action-btn { background: transparent; border: none; cursor: pointer; padding: 2px 5px; font-size: 14px; border-radius: 3px; }
+        .action-btn:hover { background: #e8eaed; }
+        .editable-name { cursor: pointer; border-bottom: 1px dashed #999; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>AEX Realtime Koersen & Portefeuille</h1>
+    <div class="controls-row">
+        <button id="btnRefresh" class="btn-primary">🔄 Ververs nu</button>
+        <div class="toggle-container">
+            <input type="checkbox" id="chkAutoRefresh" checked>
+            <label for="chkAutoRefresh">Auto-ververs elke</label>
+            <input type="number" id="numInterval" value="60" min="5">
+            <span>sec</span>
+        </div>
+        <div class="input-group" style="border-left: 1px solid #ccc; padding-left: 10px;">
+            <input type="text" id="txtNewTicker" placeholder="bv. AAPL of INGA.AS" style="width: 140px; text-transform: uppercase;">
+            <button id="btnAddTicker">➕ Voeg toe</button>
+        </div>
+        <button id="btnResetAEX">📋 Reset naar AEX 26</button>
+        <button id="btnClearAll" class="btn-danger">🗑️ Alles wissen</button>
+        <button id="btnExport" style="margin-left: auto;">📥 Excel (CSV)</button>
+        <div id="statusBar" class="status-bar">⏳ Systeem start op...</div>
+    </div>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbool</th>
+                    <th>Bedrijfsnaam</th>
+                    <th style="text-align: right;">Actuele Koers</th>
+                    <th style="text-align: right;">Vorige Slot</th>
+                    <th style="text-align: right;">Verschil (€)</th>
+                    <th style="text-align: right;">Verschil (%)</th>
+                    <th>Laatste Update</th>
+                    <th style="text-align: center;">Acties</th>
+                </tr>
+            </thead>
+            <tbody id="tickerTableBody"></tbody>
+        </table>
+    </div>
+</div>
+<script>
+    const defaultAEX = [
+        { ticker: "ASML.AS", name: "ASML Holding" }, { ticker: "UNA.AS", name: "Unilever" },
+        { ticker: "INGA.AS", name: "ING Groep" }, { ticker: "PRX.AS", name: "Prosus" },
+        { ticker: "SHELL.AS", name: "Shell" }, { ticker: "AD.AS", name: "Ahold Delhaize" },
+        { ticker: "DSM.AS", name: "DSM-Firmenich" }, { ticker: "AKZA.AS", name: "AkzoNobel" },
+        { ticker: "HEIA.AS", name: "Heineken" }, { ticker: "NN.AS", name: "NN Group" },
+        { ticker: "WKL.AS", name: "Wolters Kluwer" }, { ticker: "KPN.AS", name: "KPN" },
+        { ticker: "AALB.AS", name: "Aalberts" }, { ticker: "ASRNL.AS", name: "ASR Nederland" },
+        { ticker: "ABN.AS", name: "ABN AMRO" }, { ticker: "RAND.AS", name: "Randstad" },
+        { ticker: "UMG.AS", name: "Universal Music Group" }, { ticker: "BESI.AS", name: "BE Semiconductor" },
+        { ticker: "IMCD.AS", name: "IMCD" }, { ticker: "EXOR.AS", name: "Exor" },
+        { ticker: "GLPG.AS", name: "Galapagos" }, { ticker: "MT.AS", name: "ArcelorMittal" },
+        { ticker: "REN.AS", name: "Relx" }, { ticker: "AEX.AS", name: "AEX Index" }
+    ];
+
+    let portfolio = []; let priceData = {}; let refreshTimer = null;
+    const tableBody = document.getElementById("tickerTableBody");
+    const statusBar = document.getElementById("statusBar");
+    const chkAutoRefresh = document.getElementById("chkAutoRefresh");
+    const numInterval = document.getElementById("numInterval");
+
+    function init() {
+        const savedPortfolio = localStorage.getItem("aex_portfolio_final");
+        const savedPrices = localStorage.getItem("aex_prices_final");
+        if (savedPortfolio) { portfolio = JSON.parse(savedPortfolio); } else { portfolio = [...defaultAEX]; savePortfolio(); }
+        if (savedPrices) { priceData = JSON.parse(savedPrices); }
+        
+        renderTable(); 
+        fetchPrices(); 
+        setupAutoRefresh();
+
+        document.getElementById("btnRefresh").addEventListener("click", () => fetchPrices());
+        document.getElementById("btnAddTicker").addEventListener("click", addTicker);
+        document.getElementById("txtNewTicker").addEventListener("keypress", (e) => { if(e.key === 'Enter') addTicker(); });
+        document.getElementById("btnResetAEX").addEventListener("click", resetToDefault);
+        document.getElementById("btnClearAll").addEventListener("click", clearAll);
+        document.getElementById("btnExport").addEventListener("click", exportToCSV);
+        chkAutoRefresh.addEventListener("change", setupAutoRefresh);
+        numInterval.addEventListener("change", setupAutoRefresh);
+    }
+
+    function savePortfolio() { localStorage.setItem("aex_portfolio_final", JSON.stringify(portfolio)); }
+    function savePrices() { localStorage.setItem("aex_prices_final", JSON.stringify(priceData)); }
+
+    function renderTable() {
+        tableBody.innerHTML = "";
+        portfolio.forEach((item, index) => {
+            const ticker = item.ticker.toUpperCase(); const data = priceData[ticker] || null;
+            const tr = document.createElement("tr");
+            const price = data && data.price !== undefined ? "€ " + data.price.toFixed(2) : "--";
+            const prevClose = data && data.prevClose !== undefined ? "€ " + data.prevClose.toFixed(2) : "--";
+            let changeText = "--", pChangeText = "--", changeClass = "";
+            if (data && data.change !== undefined) {
+                const prefix = data.change > 0 ? "+" : "";
+                changeText = "€ " + prefix + data.change.toFixed(2);
+                pChangeText = prefix + data.pChange.toFixed(2) + "%";
+                if (data.change > 0) changeClass = "pos";
+                if (data.change < 0) changeClass = "neg";
+            }
+            tr.innerHTML = `<td style="font-weight:bold;">${ticker}</td>
+                <td><span class="editable-name" onclick="editName(${index})">${item.name} ✏️</span></td>
+                <td style="text-align: right; font-weight: 500;">${price}</td>
+                <td style="text-align: right; color:#777;">${prevClose}</td>
+                <td style="text-align: right;" class="${changeClass}">${changeText}</td>
+                <td style="text-align: right;" class="${changeClass}">${pChangeText}</td>
+                <td style="color:#666; font-size:11px;">${data && data.time ? data.time : "--"}</td>
+                <td style="text-align: center;"><button class="action-btn" onclick="deleteTicker(${index})">❌</button></td>`;
+            tableBody.appendChild(tr);
+        });
+    }
+

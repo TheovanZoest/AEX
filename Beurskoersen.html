@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actuele koersen</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #eef2f8; margin: 0; padding: 1rem; }
+        .container { max-width: 1400px; margin: auto; background: white; border-radius: 1rem; padding: 1rem; overflow-x: auto; }
+        h1 { font-size: 1.5rem; margin: 0 0 0.2rem; }
+        .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+        button { background: #1f5e7a; color: white; border: none; padding: 6px 14px; border-radius: 30px; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f1f5f9; }
+        .positive { color: green; font-weight: bold; }
+        .negative { color: red; font-weight: bold; }
+        .status { margin-top: 1rem; text-align: center; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📊 Actuele koersen</h1>
+    <div class="toolbar">
+        <button id="refreshBtn">🔄 Ververs</button>
+        <button id="exportBtn">📎 Export CSV</button>
+        <span id="statusMsg" style="margin-left:auto; font-size:0.75rem;"></span>
+    </div>
+    <div style="overflow-x: auto;">
+        <table id="stockTable">
+            <thead>
+                <tr><th>Symbool</th><th>Onderneming</th><th>Koers (€)</th><th>Slot vorig (€)</th><th>Verschil €</th><th>Verschil %</th><th>Laatst bijgewerkt</th></tr>
+            </thead>
+            <tbody id="tableBody"><tr><td colspan="7">Laden...</td></tr></tbody>
+        </table>
+    </div>
+    <div class="status">✅ Gebruikt een gratis CORS‑proxy. Lukt het niet? Klik op "Ververs".</div>
+</div>
+
+<script>
+    // ======================== VOLLEDIGE LIJST (uit uw vorige bestand) ========================
+    const symbols = [
+        "ASML.AS", "ADYEN.AS", "AD.AS", "AKZA.AS", "MT.AS",
+        "ASM.AS", "BESI.AS", "DSFIR.AS", "HEIN.AS", "IMCD.AS",
+        "INGA.AS", "TKWY.AS", "KPN.AS", "PHIA.AS", "PRX.AS",
+        "RAND.AS", "RELX.AS", "SHELL.AS", "UMG.AS", "WKL.AS",
+        "ABN.AS", "EXOR.AS", "ASRNL.AS", "VOPAK.AS", "REN.AS", "SIGN.AS"
+    ];
+    const names = {
+        "ASML.AS":"ASML Holding","ADYEN.AS":"Adyen","AD.AS":"Ahold Delhaize","AKZA.AS":"AkzoNobel",
+        "MT.AS":"ArcelorMittal","ASM.AS":"ASM International","BESI.AS":"BE Semiconductor","DSFIR.AS":"DSM-Firmenich",
+        "HEIN.AS":"Heineken","IMCD.AS":"IMCD","INGA.AS":"ING Groep","TKWY.AS":"Just Eat Takeaway","KPN.AS":"KPN",
+        "PHIA.AS":"Philips","PRX.AS":"Prosus","RAND.AS":"Randstad","RELX.AS":"RELX","SHELL.AS":"Shell",
+        "UMG.AS":"Universal Music Group","WKL.AS":"Wolters Kluwer","ABN.AS":"ABN AMRO Bank","EXOR.AS":"Exor",
+        "ASRNL.AS":"ASR Nederland","VOPAK.AS":"Vopak","REN.AS":"REN - vastgoed","SIGN.AS":"Signify"
+    };
+
+    // Eenvoudige proxy (werkt vaak)
+    const PROXY = "https://api.corsproxy.io/?url=";
+    const YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
+
+    let stockData = {};
+
+    async function fetchOne(symbol) {
+        const url = YAHOO_BASE + encodeURIComponent(symbol) + "?interval=1d&range=2d";
+        const full = PROXY + encodeURIComponent(url);
+        try {
+            const resp = await fetch(full);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const result = data.chart?.result?.[0];
+            if (!result) return null;
+            const meta = result.meta;
+            let current = meta.regularMarketPrice;
+            const prevClose = meta.previousClose;
+            if (current === undefined || current === null) {
+                const quotes = result.indicators.quote[0];
+                const closes = quotes.close.filter(c => c !== null);
+                if (closes.length) current = closes[closes.length-1];
+            }
+            if (current === undefined) return null;
+            const diff = current - prevClose;
+            const pct = (diff / prevClose) * 100;
+            return { current, prevClose, diff, pct };
+        } catch (err) {
+            console.warn(symbol, err);
+            return null;
+        }
+    }
+
+    async function updateAll() {
+        const statusSpan = document.getElementById('statusMsg');
+        statusSpan.innerText = "🔄 Bezig met ophalen...";
+        let success = 0;
+        const now = new Date().toLocaleTimeString('nl-NL');
+        for (const sym of symbols) {
+            const result = await fetchOne(sym);
+            if (result) {
+                stockData[sym] = { ...result, time: now };
+                success++;
+            } else {
+                if (!stockData[sym]) stockData[sym] = null;
+            }
+            // wacht even om de proxy niet te overbelasten
+            await new Promise(r => setTimeout(r, 200));
+        }
+        statusSpan.innerText = `✅ ${success}/${symbols.length} koersen geladen om ${now}`;
+        renderTable();
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('tableBody');
+        if (!symbols.length) return;
+        let html = '';
+        for (const sym of symbols) {
+            const name = names[sym] || sym;
+            const data = stockData[sym];
+            let price = '--', prev = '--', diffHtml = '--', pctHtml = '--', timeHtml = '--';
+            let diffClass = '';
+            if (data && typeof data.current === 'number') {
+                price = `€ ${data.current.toFixed(2)}`;
+                prev = `€ ${data.prevClose.toFixed(2)}`;
+                const d = data.diff;
+                const p = data.pct;
+                diffClass = d > 0 ? 'positive' : (d < 0 ? 'negative' : '');
+                diffHtml = `${d > 0 ? '+' : ''}${d.toFixed(2)}`;
+                pctHtml = `${p > 0 ? '+' : ''}${p.toFixed(2)}%`;
+                timeHtml = data.time;
+            }
+            html += `<tr>
+                        <td>${sym}</td>
+                        <td>${name}</td>
+                        <td>${price}</td>
+                        <td>${prev}</td>
+                        <td class="${diffClass}">${diffHtml}</td>
+                        <td class="${diffClass}">${pctHtml}</td>
+                        <td>${timeHtml}</td>
+                     </tr>`;
+        }
+        tbody.innerHTML = html;
+    }
+
+    function exportCSV() {
+        let csv = "Symbool;Onderneming;Koers (€);Slot vorig (€);Verschil €;Verschil %;Laatst bijgewerkt\n";
+        for (const sym of symbols) {
+            const name = names[sym] || sym;
+            const d = stockData[sym];
+            if (d && typeof d.current === 'number') {
+                csv += `${sym};${name};${d.current.toFixed(2)};${d.prevClose.toFixed(2)};${(d.diff>0?"+":"")+d.diff.toFixed(2)};${(d.pct>0?"+":"")+d.pct.toFixed(2)}%;${d.time}\n`;
+            } else {
+                csv += `${sym};${name};n.b.;n.b.;n.b.;n.b.;n.b.\n`;
+            }
+        }
+        const blob = new Blob(["\uFEFF" + csv], {type: "text/csv"});
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "koersen.csv";
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    document.getElementById('refreshBtn').onclick = updateAll;
+    document.getElementById('exportBtn').onclick = exportCSV;
+    updateAll();
+</script>
+</body>
+</html>
